@@ -521,8 +521,8 @@ function Dashboard({ data }) {
 }
 async function load() {
   if (new URLSearchParams(location.search).get("demo") === "1")
-    return (await fetch("/demo.json")).json();
-  const response = await fetch("/latest.json", { cache: "no-store" });
+    return (await fetch(import.meta.env.BASE_URL + "demo.json")).json();
+  const response = await fetch(import.meta.env.BASE_URL + "latest.json", { cache: "no-store" });
   if (response.ok && response.headers.get("content-type")?.includes("json"))
     {
       const data = await response.json();
