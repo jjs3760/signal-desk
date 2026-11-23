@@ -314,7 +314,7 @@ function Dashboard({ data }) {
           </nav>
           <span className="headerStatus">
             <i />
-            {data.demo ? "가상 시세 · 데모" : "Yahoo Finance · 일봉"}
+            {data.demo ? "가상 시세 · 데모" : data.source + " · 일봉"}
           </span>
         </div>
       </header>
@@ -338,7 +338,7 @@ function Dashboard({ data }) {
         {page === "news" ? (
           <section className="panel news">
             <h2>
-              <Newspaper /> 주요 헤드라인
+              <Newspaper /> 미국·네이버 뉴스 요약
             </h2>
             {data.news.length === 0 ? (
               <p>수집된 헤드라인이 없습니다.</p>
@@ -346,6 +346,7 @@ function Dashboard({ data }) {
               data.news.map((n, i) => (
                 <article key={i}>
                   <small>
+                    {n.region && `${n.region} · ${n.source} · `}
                     {new Date(n.date).toLocaleString("ko-KR", {
                       timeZone: "Asia/Seoul",
                     })}{" "}
@@ -360,6 +361,7 @@ function Dashboard({ data }) {
                       n.title
                     )}
                   </h3>
+                  {n.summary && <p lang={n.language}>{n.summary}</p>}
                 </article>
               ))
             )}
@@ -431,7 +433,7 @@ function Dashboard({ data }) {
                     <Change value={s.change} />
                   </div>
                   {s.reason && <p>{s.reason}</p>}
-                  {s.verifiedBy && <p>Yahoo Finance · {s.verifiedBy} 종가 일치</p>}
+                  {s.source && <p>{s.source} 일별시세 기준</p>}
                   <div className="cardfoot">
                     <span>{s.bars.at(-1).date} 종가</span>
                     <b>
@@ -461,7 +463,11 @@ async function load() {
     return (await fetch("/demo.json")).json();
   const response = await fetch("/latest.json", { cache: "no-store" });
   if (response.ok && response.headers.get("content-type")?.includes("json"))
-    return response.json();
+    {
+      const data = await response.json();
+      if (data.source !== "네이버증권") throw Error("네이버증권 시세 갱신이 필요합니다. 수집기를 실행해 주세요.");
+      return data;
+    }
   if (
     response.status === 404 ||
     (response.ok && response.headers.get("content-type")?.includes("html"))

@@ -4,16 +4,18 @@ import json
 import logging
 import os
 import tempfile
-from xml.etree import ElementTree
-from datetime import datetime, timedelta, timezone
+
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-import feedparser
+try:
+    from .market_news import collect_news, fetch
+except ImportError:  # Direct script entry point.
+    from market_news import collect_news, fetch
 import pandas as pd
 import requests
-import yfinance as yf
 from apscheduler.schedulers.blocking import BlockingScheduler
 from pydantic import BaseModel, Field, FiniteFloat
 
@@ -47,7 +49,18 @@ def history(symbol, name, now):
     korean = symbol.endswith(".KS") or symbol in ("^KS11", "^KQ11")
     local = now.astimezone(KST if korean else ZoneInfo("America/New_York"))
     closing = (15, 30) if korean else (16, 0)
-    frame = yf.Ticker(symbol).history(period="1y", interval="1d", auto_adjust=False, timeout=20)
+    code = {"^GSPC": ".INX", "^IXIC": ".IXIC", "^KS11": "KOSPI", "^KQ11": "KOSDAQ"}.get(symbol)
+    kind = "index" if code else "item"
+    if not code:
+        code = symbol.split(".")[0] if korean else symbol + ".O"
+    region = "domestic" if korean else "foreign"
+    url = f"https://api.stock.naver.com/chart/{region}/{kind}/{code}/day"
+    rows = fetch(url, params={"startDateTime":(local-timedelta(days=365)).strftime("%Y%m%d0000"),
+                              "endDateTime":local.strftime("%Y%m%d2359")}).json()
+    frame = pd.DataFrame(rows).rename(columns={"openPrice":"Open", "highPrice":"High",
+        "lowPrice":"Low", "closePrice":"Close", "accumulatedTradingVolume":"Volume"})
+    frame.index = pd.to_datetime(frame["localDate"], format="%Y%m%d")
+    frame = frame.loc[~frame.index.duplicated(keep="last")]
     frame = frame[["Open", "High", "Low", "Close", "Volume"]].dropna().sort_index()
     cutoff = local.date() + timedelta(days=int((local.hour, local.minute) >= closing))
     frame = frame[frame.index.date < cutoff]
@@ -55,23 +68,19 @@ def history(symbol, name, now):
         raise ValueError(f"{symbol} 일봉 부족 또는 시세 지연")
     bars = [dict(date=day.date().isoformat(), open=row.Open, high=row.High, low=row.Low,
                  close=row.Close, volume=int(row.Volume)) for day, row in frame.tail(90).iterrows()]
-    return dict(symbol=symbol, name=name, currency="KRW" if korean else "USD", bars=bars,
+    # Match the chart to the closing-price table shown by Naver Securities.
+    host = "https://m.stock.naver.com/api" if korean else "https://api.stock.naver.com"
+    category = "index" if kind == "index" else "stock"
+    table_url = f"{host}/{category}/{code}/price"
+    table = fetch(table_url, params={"page":1, "pageSize":60}).json()
+    completed = [row for row in table if row["localTradedAt"][:10] < cutoff.isoformat()]
+    last = max(completed, key=lambda row: row["localTradedAt"])
+    official_close = float(str(last["closePrice"]).replace(",", ""))
+    if last["localTradedAt"][:10] != bars[-1]["date"] or round(bars[-1]["close"], 2) != round(official_close, 2):
+        raise ValueError(f"{symbol} 네이버증권 일봉과 일별시세가 일치하지 않습니다")
+    return dict(symbol=symbol, name=name, source="네이버증권", sourceUrl=table_url+"?page=1&pageSize=60", currency="KRW" if korean else "USD", bars=bars,
                 price=bars[-1]["close"], change=100*(bars[-1]["close"]/bars[-2]["close"]-1),
                 indicators=indicators(frame))
-
-
-def headlines(query, now):
-    response = requests.get("https://news.google.com/rss/search", params={
-        "q": query + " when:1d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"}, timeout=12)
-    response.raise_for_status()
-    items = []
-    for entry in feedparser.parse(response.content).entries:
-        if not entry.get("published_parsed"):
-            continue
-        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-        if now-timedelta(days=1) <= published <= now and entry.link.startswith("https://"):
-            items.append(dict(title=entry.title[:240], url=entry.link, date=published.isoformat()))
-    return items[:4]
 
 
 class Pick(BaseModel):
@@ -104,37 +113,6 @@ def analyze(context):
     return sorted(picks, key=lambda p: -p.score)
 
 
-def verify_close(stock):
-    symbol = stock["symbol"]
-    day = stock["bars"][-1]["date"]
-    if symbol.endswith(".KS"):
-        code = symbol.split(".")[0]
-        response = requests.get("https://fchart.stock.naver.com/sise.nhn", params={
-            "symbol": code, "timeframe": "day", "count": 3, "requestType": 0}, timeout=12)
-        response.raise_for_status()
-        chart = ElementTree.fromstring(response.content.decode("euc-kr")).find(".//chartdata")
-        if chart is None or chart.get("symbol") != code:
-            raise ValueError("검증 종목 불일치")
-        rows = [item.attrib["data"].split("|") for item in chart.findall("item")]
-        close = next(float(row[4]) for row in rows if row[0] == day.replace("-", ""))
-        source = "네이버증권"
-    else:
-        start = datetime.fromisoformat(day).date() - timedelta(days=2)
-        response = requests.get(f"https://api.nasdaq.com/api/quote/{symbol}/historical",
-            params={"assetclass":"stocks", "fromdate":start.isoformat(), "todate":day},
-            headers={"User-Agent":"Mozilla/5.0"}, timeout=12)
-        response.raise_for_status()
-        data = response.json()["data"]
-        if data["symbol"] != symbol:
-            raise ValueError("검증 종목 불일치")
-        close = next(float(row["close"].strip("$").replace(",", "")) for row in data["tradesTable"]["rows"]
-                     if datetime.strptime(row["date"], "%m/%d/%Y").date().isoformat() == day)
-        source = "Nasdaq"
-    if round(stock["price"], 2) != round(close, 2):
-        raise ValueError(f"{day} Yahoo {stock['price']:.2f}, {source} {close:.2f}")
-    return source
-
-
 def collect():
     now = datetime.now(KST)
     markets = [history(s, n, now) for s, n in INDICES.items()]
@@ -143,18 +121,17 @@ def collect():
     for symbol, name in STOCKS.items():
         try:
             stock = history(symbol, name, now)
-            stock["verifiedBy"] = verify_close(stock)
             stocks[symbol] = stock
         except Exception:
             excluded.append(name)
             logging.exception("후보 제외 %s", symbol)
-    news = {}
-    for key, query in [("market", "글로벌 증시 OR 한국 증시"), *((s, v["name"] + " 주식") for s, v in stocks.items())]:
-        try:
-            news[key] = headlines(query, now)
-        except requests.RequestException:
-            logging.exception("뉴스 수집 실패 %s", key)
-            news[key] = []
+    articles = collect_news(now)
+    news = {"market": articles}
+    aliases = {"NVDA":"nvidia", "MSFT":"microsoft", "AAPL":"apple", "000660.KS":"hynix",
+               "005930.KS":"samsung", "035420.KS":"naver"}
+    for symbol, stock in stocks.items():
+        terms = (stock["name"].casefold(), symbol.casefold(), aliases[symbol])
+        news[symbol] = [a for a in articles if any(t in (a["title"]+" "+a["summary"]).casefold() for t in terms)]
     def summary(row):
         return {**{k: v for k, v in row.items() if k != "bars"},
                 "asOf": row["bars"][-1]["date"], "recentOHLCV": row["bars"][-10:]}
@@ -169,7 +146,7 @@ def collect():
         except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
             logging.exception("AI 분석 실패")
             cards.clear()
-    snapshot = dict(asOf=now.isoformat(), demo=False, markets=markets, stocks=cards or list(stocks.values()),
+    snapshot = dict(asOf=now.isoformat(), demo=False, source="네이버증권", markets=markets, stocks=cards or list(stocks.values()),
                     ranked=bool(cards), excluded=excluded, news=news["market"],
                     sentiment=round(sum(m["indicators"]["rsi"] for m in markets) / len(markets)))
     payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
@@ -191,4 +168,3 @@ if __name__ == "__main__":
         scheduler.start()
     else:
         collect()
-

@@ -6,8 +6,8 @@
 
 ```text
 APScheduler (07:30 KST)
-  ├─ yfinance → 지수 4개와 후보 6개 일봉 → pandas 보조지표
-  └─ Google News RSS → 시장·종목별 헤드라인, 기사 시각과 링크
+  ├─ 네이버증권 → 지수 4개와 후보 6개 일봉·일별시세 대조 → pandas 보조지표
+  └─ 미국 경제지 RSS + 네이버뉴스 경제 기사 → 요약, 매체, 기사 시각과 링크
                        ↓
        Gemini generateContent → Pydantic 및 가격 범위 검증
                        ↓
@@ -45,10 +45,11 @@ $env:GEMINI_MODEL = Read-Host "사용할 Gemini 모델 ID"
 ## 산출 기준
 
 - S&P 500, NASDAQ Composite, KOSPI, KOSDAQ와 후보 종목 6개를 backend/pipeline.py에 정의했습니다. 미국은 뉴욕, 한국은 서울 시간으로 당일 마감 전 일봉을 제외합니다. 휴장일에는 가장 최근 거래일을 사용합니다.
-- 약 1년의 OHLCV로 SMA(5·20·60), Wilder RSI(14), MACD(12·26·9), 볼린저 밴드(20일 평균 ± 모집단 표준편차 2배)를 계산합니다. 지표와 차트의 가격 기준은 Yahoo의 Close입니다. 배당 재투자 수익률은 포함하지 않습니다.
+- 약 1년의 네이버증권 OHLCV로 SMA(5·20·60), Wilder RSI(14), MACD(12·26·9), 볼린저 밴드(20일 평균 ± 모집단 표준편차 2배)를 계산합니다. 종가는 거래소 현지 통화 기준입니다.
 - 시장 심리 점수는 네 지수 RSI의 단순평균을 반올림한 자체 지표입니다. 40 미만은 비관, 60 이상은 낙관입니다. 개별 종목 AI 점수는 후보 사이의 상대 평가입니다.
-- 시장과 각 후보의 최근 뉴스 최대 4건, 기술지표, 최근 10거래일 OHLCV를 모델에 전달합니다. 정확히 3개 후보의 중복 여부, 정수 점수 0~100, 양수 손절가 < 종가 < 목표가를 검증합니다.
-- 후보 종목의 최신 Yahoo 종가를 같은 거래일의 Nasdaq(미국) 또는 네이버증권(한국) 종가와 대조합니다. 가격이 다르거나 대조할 값이 없으면 확인 보류 목록으로 옮깁니다. 지수와 과거 차트는 Yahoo 일봉을 사용합니다. 지수를 수집할 수 없으면 이전 파일을 유지합니다.
+- 미국 MarketWatch·월스트리트저널 RSS의 기사 소개문과 네이버뉴스 경제 섹션의 기사 본문에서 최근 24시간 자료를 수집합니다. 핵심 문장을 추출하고 미국 요약은 Google 번역을 통해 한국어로 표시합니다. 번역 실패 시 영어 요약을 유지합니다. 기사마다 매체·시각·원문 링크를 제공합니다.
+- 시장 뉴스 요약과 종목명·티커가 등장한 기사, 기술지표 및 최근 10거래일 OHLCV를 모델에 전달합니다. 정확히 3개 후보의 중복 여부, 정수 점수 0~100, 양수 손절가 < 종가 < 목표가를 검증합니다.
+- 지수와 후보 종목의 최신 네이버증권 차트 종가를 같은 서비스의 일별시세 표와 대조합니다. 거래일이나 종가가 일치하지 않는 후보는 보류합니다. 지수 검증 실패 시 이전 파일을 유지합니다.
 - 후보가 3개 미만이거나 Gemini 설정이 없거나 AI 응답이 유효하지 않으면 검증된 후보의 종가와 기술지표만 제공합니다. 뉴스 요청 실패 또는 결과 0건은 빈 목록으로 처리합니다.
 - 사이트는 종목 선택, 20·60·90거래일 차트, 상세 리포트·기술지표 탭, 시장 뉴스와 고정 면책 문구를 제공합니다.
 
@@ -64,5 +65,5 @@ $env:SNAPSHOT_PATH = Join-Path (Resolve-Path dist) 'latest.json'
 
 대시보드와 카드, 차트 컴포넌트는 src/main.jsx에, 반응형 스타일은 src/style.css에 있습니다. 샘플을 재생성하려면 가상환경에서 python backend/demo.py를 실행하세요.
 
-시세와 모델 응답 형식의 공식 문서를 참고하세요. [yfinance history](https://ranaroussi.github.io/yfinance/reference/api/yfinance.Ticker.history.html) · [Gemini 구조화 출력](https://ai.google.dev/gemini-api/docs/structured-output)
+참고 자료는 [네이버증권](https://m.stock.naver.com/), [네이버뉴스 경제](https://news.naver.com/section/101), [Gemini 구조화 출력](https://ai.google.dev/gemini-api/docs/structured-output)에서 확인할 수 있습니다.
 
