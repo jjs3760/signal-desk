@@ -36,6 +36,18 @@ def summarize(text):
     return " ".join(sentences[i] for i in selected)[:600]
 
 
+def translate_summary(summary):
+    try:
+        translated = fetch("https://translate.googleapis.com/translate_a/single", params={
+            "client":"gtx", "sl":"en", "tl":"ko", "dt":"t", "q":summary}).json()
+        korean = "".join(part[0] for part in translated[0] if part[0])
+        if re.search("[가-힣]", korean):
+            return korean, "ko"
+    except (ValueError, TypeError, KeyError, IndexError, requests.RequestException):
+        logging.warning("번역을 사용할 수 없어 영어 요약 표시")
+    return summary, "en"
+
+
 def us_news(now):
     articles = []
     for source, url in US_FEEDS.items():
@@ -53,16 +65,7 @@ def us_news(now):
             body = BeautifulSoup(e.get("summary", ""), "html.parser").get_text(" ", strip=True)
             if not body or body.strip() == e.title.strip():
                 continue
-            summary = summarize(body)
-            language = "en"
-            try:
-                translated = fetch("https://translate.googleapis.com/translate_a/single", params={
-                    "client":"gtx", "sl":"en", "tl":"ko", "dt":"t", "q":summary}).json()
-                korean = "".join(part[0] for part in translated[0] if part[0])
-                if re.search("[가-힣]", korean):
-                    summary, language = korean, "ko"
-            except (ValueError, TypeError, KeyError, IndexError, requests.RequestException):
-                logging.warning("번역을 사용할 수 없어 영어 요약 표시")
+            summary, language = translate_summary(summarize(body))
             articles.append(dict(source=source, region="미국", title=e.title, url=e.link, date=stamp.isoformat(),
                                  summary=summary, language=language))
             if sum(a["source"] == source for a in articles) >= 4:
@@ -110,4 +113,40 @@ def collect_news(now):
         except requests.RequestException:
             logging.exception("뉴스 수집 실패 %s", read.__name__)
     return sorted(articles.values(), key=lambda article: datetime.fromisoformat(article["date"]), reverse=True)
+
+
+def company_news(item, now):
+    host = "https://m.stock.naver.com/api" if item["exchange"] in ("KOSPI", "KOSDAQ") else "https://api.stock.naver.com"
+    groups = fetch(f"{host}/news/stock/{item['code']}", params={"page":1, "pageSize":10}).json()
+    articles = {}
+    for group in groups:
+        for article in group["items"]:
+            stamp = datetime.strptime(article["datetime"][:12], "%Y%m%d%H%M").replace(tzinfo=ZoneInfo("Asia/Seoul"))
+            url = article.get("mobileNewsUrl", "")
+            if not url.startswith("https://") or not now-timedelta(days=7) <= stamp <= now:
+                continue
+            body = BeautifulSoup(article.get("body") or "", "html.parser").get_text(" ", strip=True)
+            articles[url] = dict(source=article["officeName"], region="네이버증권 종목 뉴스",
+                title=BeautifulSoup(article["title"], "html.parser").get_text(), date=stamp.isoformat(),
+                url=url, summary=summarize(body), language="ko")
+    if item["exchange"] in ("NASDAQ", "NYSE"):
+        params = {"s":item["symbol"], "region":"US", "lang":"en-US"}
+        try:
+            feed = feedparser.parse(fetch("https://feeds.finance.yahoo.com/rss/2.0/headline", params=params).content)
+            for entry in feed.entries[:8]:
+                if not entry.get("published_parsed") or not entry.get("link", "").startswith("https://"):
+                    continue
+                stamp = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                if not now-timedelta(days=7) <= stamp <= now:
+                    continue
+                body = BeautifulSoup(entry.get("summary", ""), "html.parser").get_text(" ", strip=True)
+                summary, language = translate_summary(summarize(body)) if body else ("", "en")
+                articles[entry.link] = dict(source=entry.get("source", {}).get("title") or "Yahoo Finance 종목 피드",
+                    region="미국", title=entry.title, date=stamp.isoformat(), url=entry.link,
+                    summary=summary, language=language)
+                if sum(a["region"] == "미국" for a in articles.values()) >= 2:
+                    break
+        except requests.RequestException:
+            logging.warning("미국 종목 피드 조회 실패 %s", item["symbol"])
+    return sorted(articles.values(), key=lambda a:datetime.fromisoformat(a["date"]), reverse=True)[:3]
 

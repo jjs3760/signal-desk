@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,10 +13,12 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 try:
-    from .market_news import collect_news, fetch
+    from .market_news import collect_news, company_news, fetch
+    from .universe import CATALOG, STOCKS
     from .trade_plan import trade_plan
 except ImportError:  # Direct script entry point.
-    from market_news import collect_news, fetch
+    from market_news import collect_news, company_news, fetch
+    from universe import CATALOG, STOCKS
     from trade_plan import trade_plan
 import pandas as pd
 import requests
@@ -24,8 +28,6 @@ from pydantic import BaseModel, Field
 KST = ZoneInfo("Asia/Seoul")
 OUTPUT = Path(os.environ.get("SNAPSHOT_PATH", Path(__file__).resolve().parents[1] / "public/latest.json"))
 INDICES = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^KS11": "KOSPI", "^KQ11": "KOSDAQ"}
-STOCKS = {"NVDA": "엔비디아", "AAPL": "애플", "MSFT": "마이크로소프트",
-          "005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "035420.KS": "NAVER"}
 
 
 def indicators(frame):
@@ -48,13 +50,13 @@ def indicators(frame):
 
 
 def history(symbol, name, now):
-    korean = symbol.endswith(".KS") or symbol in ("^KS11", "^KQ11")
+    korean = symbol.endswith((".KS", ".KQ")) or symbol in ("^KS11", "^KQ11")
     local = now.astimezone(KST if korean else ZoneInfo("America/New_York"))
     closing = (15, 30) if korean else (16, 0)
     code = {"^GSPC": ".INX", "^IXIC": ".IXIC", "^KS11": "KOSPI", "^KQ11": "KOSDAQ"}.get(symbol)
     kind = "index" if code else "item"
     if not code:
-        code = symbol.split(".")[0] if korean else symbol + ".O"
+        code = CATALOG[symbol]["code"]
     region = "domestic" if korean else "foreign"
     url = f"https://api.stock.naver.com/chart/{region}/{kind}/{code}/day"
     rows = fetch(url, params={"startDateTime":(local-timedelta(days=365)).strftime("%Y%m%d0000"),
@@ -113,27 +115,31 @@ def analyze(context):
     return sorted(picks, key=lambda p: -p.score)
 
 
-def collect():
+def collect(morning=False):
     now = datetime.now(KST)
     markets = [history(s, n, now) for s, n in INDICES.items()]
-    stocks = {}
-    excluded = []
-    for symbol, name in STOCKS.items():
+    def collect_item(item):
+        symbol, name = item["symbol"], item["name"]
+        stock = item.copy()
         try:
-            stock = history(symbol, name, now)
+            stock.update(history(symbol, name, now))
             stock["plan"] = trade_plan(stock)
-            stocks[symbol] = stock
         except Exception:
-            excluded.append(name)
-            logging.exception("후보 제외 %s", symbol)
+            logging.exception("시세 확인 보류 %s", symbol)
+        try:
+            stock["news"] = company_news(item, now)
+        except Exception:
+            logging.exception("종목 뉴스 조회 실패 %s", symbol)
+            stock.update(news=[], newsError=True)
+        return stock
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        universe = list(pool.map(collect_item, CATALOG.values()))
+    stocks = {s["symbol"]:s for s in universe if s.get("plan")}
+    excluded = [s["name"] for s in universe if not s.get("plan")]
     articles = collect_news(now)
     news = {"market": articles}
-    aliases = {"NVDA":"nvidia", "MSFT":"microsoft", "AAPL":"apple", "000660.KS":"hynix",
-               "005930.KS":"samsung", "035420.KS":"naver"}
-    for symbol, stock in stocks.items():
-        terms = (stock["name"].casefold(), symbol.casefold(), aliases[symbol])
-        news[symbol] = [a for a in articles if any(t in (a["title"]+" "+a["summary"]).casefold() for t in terms)]
-        stock["news"] = news[symbol]
+    for stock in universe:
+        news[stock["symbol"]] = stock["news"]
     def summary(row):
         return {**{k: v for k, v in row.items() if k != "bars"},
                 "asOf": row["bars"][-1]["date"], "recentOHLCV": row["bars"][-10:]}
@@ -148,8 +154,13 @@ def collect():
             logging.exception("AI 분석 실패")
             cards.clear()
     snapshot = dict(asOf=now.isoformat(), demo=False, source="네이버증권", markets=markets, stocks=cards or list(stocks.values()),
-                    ranked=bool(cards), excluded=excluded, news=news["market"],
+                    universe=universe, ranked=bool(cards), excluded=excluded, news=news["market"],
                     sentiment=round(sum(m["indicators"]["rsi"] for m in markets) / len(markets)))
+    if morning:
+        release = now.replace(hour=7, minute=30, second=0, microsecond=0)
+        if release-timedelta(minutes=5) <= now < release:
+            time.sleep(max(0, (release-datetime.now(KST)).total_seconds()))
+    snapshot["publishedAt"] = datetime.now(KST).isoformat()
     payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=OUTPUT.parent, delete=False, encoding="utf-8") as file:
@@ -161,11 +172,12 @@ def collect():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--schedule", action="store_true")
+    parser.add_argument("--morning", action="store_true", help="07:25 수집 후 07:30 KST 게시")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     if args.schedule:
         scheduler = BlockingScheduler(timezone=KST)
-        scheduler.add_job(collect, "cron", hour=7, minute=30, misfire_grace_time=3600)
+        scheduler.add_job(collect, "cron", hour=7, minute=25, kwargs={"morning":True}, misfire_grace_time=3600)
         scheduler.start()
     else:
-        collect()
+        collect(morning=args.morning)

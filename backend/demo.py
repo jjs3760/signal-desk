@@ -7,6 +7,7 @@ import pandas as pd
 
 from pipeline import INDICES, STOCKS, indicators
 from trade_plan import trade_plan
+from universe import CATALOG
 
 
 def sample(symbol, name, end_price, change, seed):
@@ -27,7 +28,7 @@ def sample(symbol, name, end_price, change, seed):
     bars = [dict(date=date.date().isoformat(), **{k.lower():round(float(v),2) for k,v in row.items()})
             for date,row in frame.tail(90).iterrows()]
     return dict(symbol=symbol, name=name, price=end_price, change=change, bars=bars,
-                currency="KRW" if symbol.endswith(".KS") else "USD", indicators=indicators(frame))
+                currency="KRW" if symbol.endswith((".KS", ".KQ")) else "USD", indicators=indicators(frame))
 
 
 markets = [sample(s,n,p,c,seed) for (s,n),(p,c,seed) in zip(INDICES.items(),[
@@ -41,7 +42,18 @@ for i,(s,p,c,score,reason,risk) in enumerate([
                        target=round(p*1.08,2),stop=round(p*.95,2),news=[]))
 for stock in stocks:
     stock["plan"] = trade_plan(stock)
+demo_lookup = {s["symbol"]:s for s in stocks}
+universe = []
+for i, item in enumerate(CATALOG.values()):
+    symbol = item["symbol"]
+    stock = demo_lookup.get(symbol)
+    if stock is None:
+        price = (30000 + 1200*i) if item["exchange"] in ("KOSPI", "KOSDAQ") else 70 + 5*i
+        stock = sample(symbol, item["name"], price, .6, i+100)
+        stock.update(plan=trade_plan(stock), news=[])
+    universe.append({**item, **stock})
 snapshot = dict(demo=True,asOf="2026-11-23T07:30:00+09:00",markets=markets,stocks=stocks,
+                universe=universe,
                 sentiment=round(sum(m["indicators"]["rsi"] for m in markets)/4),
                 news=[dict(title=t,date="2026-11-23T06:30:00+09:00",url=None) for t in
                       ["미국 기술주 강세와 반도체 업종 수급 점검", "국내 증시 개장 전 원화와 수출주 동향"]])

@@ -214,15 +214,14 @@ function TradeReport({ stock }) {
     {stock.reason && <p><b>선정 의견</b> {stock.reason}</p>}
     {stock.risk && <p><b>위험 요인</b> {stock.risk}</p>}
     {stock.sourceUrl && <a href={stock.sourceUrl} target="_blank" rel="noreferrer">네이버증권 기준 시세</a>}
-    {stock.news?.slice(0, 2).map(n => <p key={n.url}><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a></p>)}
   </>;
 }
-function Detail({ s }) {
+function Detail({ s, id = "detail" }) {
   const [count, setCount] = useState(20),
     [tab, setTab] = useState("분석 리포트");
   const ind = s.indicators;
   return (
-    <section className="detail panel" id="detail">
+    <section className="detail panel" id={id}>
       <div className="detailTop">
         <h2>
           <Activity /> 종목 상세 분석 <span className="muted">{s.name}</span>
@@ -281,6 +280,37 @@ function Detail({ s }) {
       </div>
     </section>
   );
+}
+function CompanyNews({stock}) {
+  return <section className="panel news"><h2><Newspaper/> {stock.name} 관련 뉴스</h2>
+    <small>최근 7일 · 최대 3건</small>
+    {stock.news?.length ? stock.news.map(n => <article key={n.url}>
+      <small>{n.source} · {new Date(n.date).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST</small>
+      <h3><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a></h3>
+      {n.summary && <p lang={n.language}>{n.summary}</p>}
+    </article>) : <p>{stock.newsError ? "뉴스를 불러오지 못했습니다." : "최근 7일 동안 수집된 관련 기사가 없습니다."}</p>}
+  </section>;
+}
+function SectorDirectory({universe}) {
+  const sectors = [...new Set(universe.map(s => s.sector))];
+  const [sector, setSector] = useState(null);
+  const [symbol, select] = useState(null);
+  const rows = universe.filter(s => s.sector === sector);
+  const stock = rows.find(s => s.symbol === symbol);
+  return <section className="directory">
+    <div className="sectionHead"><h2><LayoutDashboard/> 업종별 후보 종목</h2><small>총 {universe.length}개</small></div>
+    <div className="sectorButtons">{sectors.map(name => <button key={name} aria-pressed={name===sector}
+        onClick={() => {setSector(name); select(null);}}>{name} <small>{universe.filter(s=>s.sector===name).length}종목</small></button>)}</div>
+    {sector && <><h3>{sector} 후보 종목</h3><div className="sectorRows">{rows.map(s =>
+      <button key={s.symbol} aria-pressed={symbol===s.symbol} onClick={() => {
+        select(s.symbol); requestAnimationFrame(() => document.getElementById("sector-report")?.scrollIntoView({behavior:"smooth",block:"start"}));
+      }}>
+        <span><b>{s.name}</b><small>{s.symbol} · {s.exchange} · {s.business}</small></span>
+        <span>{s.price != null ? price(s.price,s.currency) : "시세 확인 보류"}<small>관련 뉴스 {s.news?.length || 0}건</small></span>
+      </button>)}</div></>}
+    {stock && <div id="sector-report">{stock.plan ? <Detail id="sector-chart" key={stock.symbol} s={stock}/> :
+      <p>{stock.name}의 마감 시세를 확인하지 못해 가격 분석을 보류했습니다.</p>}<CompanyNews stock={stock}/></div>}
+  </section>;
 }
 function Dashboard({ data }) {
   const ranked = data.ranked ?? true;
@@ -343,6 +373,7 @@ function Dashboard({ data }) {
             ? "글로벌 시장 흐름과 AI가 선별한 오늘의 투자 시그널"
             : "최근 24시간 동안 수집된 글로벌 증시 주요 헤드라인"}
         </p>
+        {data.publishedAt && <p className="subtitle">최근 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST · 매일 오전 7:30 게시 예정</p>}
         {page === "news" ? (
           <section className="panel news">
             <h2>
@@ -399,7 +430,8 @@ function Dashboard({ data }) {
               ))}
               <Sentiment score={data.sentiment} />
             </div>
-            <div className="sectionHead picksHead">
+            {data.universe && <SectorDirectory universe={data.universe}/>}
+            {(ranked || !data.universe) && <><div className="sectionHead picksHead">
               <h2>
                 <Sparkles /> {ranked ? <>오늘의 AI 추천주 <em>TOP 3</em></> : "후보 종목 종가"}
               </h2>
@@ -432,7 +464,7 @@ function Dashboard({ data }) {
                     <div>
                       <h3>{s.name}</h3>
                       <small>
-                        {s.symbol} · {s.currency === "KRW" ? "KOSPI" : "NASDAQ"}
+                        {s.symbol} · {s.exchange || (s.currency === "KRW" ? "KOSPI" : "NASDAQ")}
                       </small>
                     </div>
                   </div>
@@ -455,7 +487,7 @@ function Dashboard({ data }) {
             {data.stocks[selected] && <Detail
               key={data.stocks[selected].symbol}
               s={data.stocks[selected]}
-            />}
+            />}{data.stocks[selected] && <CompanyNews stock={data.stocks[selected]}/>}</>}
           </>
         )}
       </main>
@@ -487,9 +519,12 @@ function App() {
   const [data, setData] = useState(null),
     [error, setError] = useState(false);
   useEffect(() => {
-    load()
-      .then(setData)
+    const refresh = () => load()
+      .then(next => setData(old => old?.asOf === next.asOf ? old : next))
       .catch((err) => setError(err.message));
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    return () => clearInterval(timer);
   }, []);
   return data ? (
     <Dashboard data={data} />
