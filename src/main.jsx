@@ -191,7 +191,7 @@ function CandleChart({ bars, count }) {
 }
 function Detail({ s }) {
   const [count, setCount] = useState(20),
-    [tab, setTab] = useState("분석 리포트");
+    [tab, setTab] = useState(s.score == null ? "기술 지표" : "분석 리포트");
   const ind = s.indicators;
   return (
     <section className="detail panel" id="detail">
@@ -200,7 +200,7 @@ function Detail({ s }) {
           <Activity /> 종목 상세 분석 <span className="muted">{s.name}</span>
         </h2>
         <div className="segments">
-          {["분석 리포트", "기술 지표"].map((t) => (
+          {(s.score == null ? ["기술 지표"] : ["분석 리포트", "기술 지표"]).map((t) => (
             <button key={t} aria-pressed={t === tab} onClick={() => setTab(t)}>
               {t}
             </button>
@@ -275,6 +275,7 @@ function Detail({ s }) {
   );
 }
 function Dashboard({ data }) {
+  const ranked = data.ranked ?? true;
   const [selected, select] = useState(0),
     [page, setPage] = useState("desk");
   const time = new Date(data.asOf),
@@ -313,7 +314,7 @@ function Dashboard({ data }) {
           </nav>
           <span className="headerStatus">
             <i />
-            {data.demo ? "샘플 데이터" : "일일 데이터"}
+            {data.demo ? "가상 시세 · 데모" : "Yahoo Finance · 일봉"}
           </span>
         </div>
       </header>
@@ -329,7 +330,8 @@ function Dashboard({ data }) {
           </div>
         </div>
         <p className="subtitle">
-          {page === "desk"
+          {data.demo ? "데모 모드입니다. 모든 가격·추천은 가상의 예시입니다." : page === "desk" && !ranked
+            ? "최근 마감 종가와 기술지표 · AI 추천 미생성" : page === "desk"
             ? "글로벌 시장 흐름과 AI가 선별한 오늘의 투자 시그널"
             : "최근 24시간 동안 수집된 글로벌 증시 주요 헤드라인"}
         </p>
@@ -389,9 +391,9 @@ function Dashboard({ data }) {
             </div>
             <div className="sectionHead picksHead">
               <h2>
-                <Sparkles /> 오늘의 AI 추천주 <em>TOP 3</em>
+                <Sparkles /> {ranked ? <>오늘의 AI 추천주 <em>TOP 3</em></> : "후보 종목 종가"}
               </h2>
-              <small>AI 점수순</small>
+              <small>{ranked ? "AI 점수순" : "동일 거래일 종가 대조"}</small>
             </div>
             <div className="stockGrid">
               {data.stocks.map((s, i) => (
@@ -409,12 +411,12 @@ function Dashboard({ data }) {
                       });
                   }}
                 >
-                  <div className="rank">
+                  {ranked && <div className="rank">
                     <span>RANK 0{i + 1}</span>
                     <span className="score">
                       <Sparkles size={13} /> AI 점수 <b>{s.score}</b>
                     </span>
-                  </div>
+                  </div>}
                   <div className="stockName">
                     <Logo symbol={s.symbol} />
                     <div>
@@ -428,7 +430,8 @@ function Dashboard({ data }) {
                     <strong>{price(s.price, s.currency)}</strong>
                     <Change value={s.change} />
                   </div>
-                  <p>{s.reason}</p>
+                  {s.reason && <p>{s.reason}</p>}
+                  {s.verifiedBy && <p>Yahoo Finance · {s.verifiedBy} 종가 일치</p>}
                   <div className="cardfoot">
                     <span>{s.bars.at(-1).date} 종가</span>
                     <b>
@@ -438,10 +441,11 @@ function Dashboard({ data }) {
                 </button>
               ))}
             </div>
-            <Detail
+            {data.excluded?.length > 0 && <p className="subtitle">종가 확인 보류 · {data.excluded.join(", ")}</p>}
+            {data.stocks[selected] && <Detail
               key={data.stocks[selected].symbol}
               s={data.stocks[selected]}
-            />
+            />}
           </>
         )}
       </main>
@@ -453,6 +457,8 @@ function Dashboard({ data }) {
   );
 }
 async function load() {
+  if (new URLSearchParams(location.search).get("demo") === "1")
+    return (await fetch("/demo.json")).json();
   const response = await fetch("/latest.json", { cache: "no-store" });
   if (response.ok && response.headers.get("content-type")?.includes("json"))
     return response.json();
@@ -460,7 +466,7 @@ async function load() {
     response.status === 404 ||
     (response.ok && response.headers.get("content-type")?.includes("html"))
   )
-    return (await fetch("/demo.json")).json();
+    throw Error("저장된 시세가 없습니다. Python 수집기를 실행해 주세요.");
   throw Error("데이터를 불러오지 못했습니다.");
 }
 function App() {
@@ -469,14 +475,14 @@ function App() {
   useEffect(() => {
     load()
       .then(setData)
-      .catch(() => setError(true));
+      .catch((err) => setError(err.message));
   }, []);
   return data ? (
     <Dashboard data={data} />
   ) : (
     <main>
       {error
-        ? "데이터 로드 실패. 잠시 후 새로고침해 주세요."
+        ? <>{error} <a href="?demo=1">가상 데이터 데모 보기</a></>
         : "시장 데이터를 불러오는 중…"}
     </main>
   );

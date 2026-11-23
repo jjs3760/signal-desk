@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+from xml.etree import ElementTree
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -103,30 +104,73 @@ def analyze(context):
     return sorted(picks, key=lambda p: -p.score)
 
 
+def verify_close(stock):
+    symbol = stock["symbol"]
+    day = stock["bars"][-1]["date"]
+    if symbol.endswith(".KS"):
+        code = symbol.split(".")[0]
+        response = requests.get("https://fchart.stock.naver.com/sise.nhn", params={
+            "symbol": code, "timeframe": "day", "count": 3, "requestType": 0}, timeout=12)
+        response.raise_for_status()
+        chart = ElementTree.fromstring(response.content.decode("euc-kr")).find(".//chartdata")
+        if chart is None or chart.get("symbol") != code:
+            raise ValueError("검증 종목 불일치")
+        rows = [item.attrib["data"].split("|") for item in chart.findall("item")]
+        close = next(float(row[4]) for row in rows if row[0] == day.replace("-", ""))
+        source = "네이버증권"
+    else:
+        start = datetime.fromisoformat(day).date() - timedelta(days=2)
+        response = requests.get(f"https://api.nasdaq.com/api/quote/{symbol}/historical",
+            params={"assetclass":"stocks", "fromdate":start.isoformat(), "todate":day},
+            headers={"User-Agent":"Mozilla/5.0"}, timeout=12)
+        response.raise_for_status()
+        data = response.json()["data"]
+        if data["symbol"] != symbol:
+            raise ValueError("검증 종목 불일치")
+        close = next(float(row["close"].strip("$").replace(",", "")) for row in data["tradesTable"]["rows"]
+                     if datetime.strptime(row["date"], "%m/%d/%Y").date().isoformat() == day)
+        source = "Nasdaq"
+    if round(stock["price"], 2) != round(close, 2):
+        raise ValueError(f"{day} Yahoo {stock['price']:.2f}, {source} {close:.2f}")
+    return source
+
+
 def collect():
     now = datetime.now(KST)
     markets = [history(s, n, now) for s, n in INDICES.items()]
     stocks = {}
+    excluded = []
     for symbol, name in STOCKS.items():
         try:
-            stocks[symbol] = history(symbol, name, now)
+            stock = history(symbol, name, now)
+            stock["verifiedBy"] = verify_close(stock)
+            stocks[symbol] = stock
         except Exception:
+            excluded.append(name)
             logging.exception("후보 제외 %s", symbol)
-    if len(stocks) < 3:
-        raise ValueError("유효 후보 부족")
-    news = {key: headlines(query, now) for key, query in [
-        ("market", "글로벌 증시 OR 한국 증시"), *((s, v["name"] + " 주식") for s, v in stocks.items())]}
+    news = {}
+    for key, query in [("market", "글로벌 증시 OR 한국 증시"), *((s, v["name"] + " 주식") for s, v in stocks.items())]:
+        try:
+            news[key] = headlines(query, now)
+        except requests.RequestException:
+            logging.exception("뉴스 수집 실패 %s", key)
+            news[key] = []
     def summary(row):
         return {**{k: v for k, v in row.items() if k != "bars"},
                 "asOf": row["bars"][-1]["date"], "recentOHLCV": row["bars"][-10:]}
-    picks = analyze(dict(markets=list(map(summary, markets)), stocks=list(map(summary, stocks.values())), news=news))
     cards = []
-    for pick in picks:
-        stock = stocks[pick.symbol]
-        if not 0 < pick.stop < stock["price"] < pick.target:
-            raise ValueError("목표가·손절가 검증 실패")
-        cards.append({**stock, **pick.model_dump(), "news": news[pick.symbol]})
-    snapshot = dict(asOf=now.isoformat(), demo=False, markets=markets, stocks=cards, news=news["market"],
+    if len(stocks) >= 3 and os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_MODEL"):
+        try:
+            for pick in analyze(dict(markets=list(map(summary, markets)), stocks=list(map(summary, stocks.values())), news=news)):
+                stock = stocks[pick.symbol]
+                if not 0 < pick.stop < stock["price"] < pick.target:
+                    raise ValueError("목표가·손절가 검증 실패")
+                cards.append({**stock, **pick.model_dump(), "news": news[pick.symbol]})
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
+            logging.exception("AI 분석 실패")
+            cards.clear()
+    snapshot = dict(asOf=now.isoformat(), demo=False, markets=markets, stocks=cards or list(stocks.values()),
+                    ranked=bool(cards), excluded=excluded, news=news["market"],
                     sentiment=round(sum(m["indicators"]["rsi"] for m in markets) / len(markets)))
     payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
