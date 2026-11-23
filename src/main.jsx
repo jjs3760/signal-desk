@@ -189,9 +189,37 @@ function CandleChart({ bars, count }) {
     </svg>
   );
 }
+function TradeReport({ stock }) {
+  const plan = stock.plan;
+  if (!plan) return <p>이전 리포트입니다. 다음 시세 수집 후 가격별 산출 근거가 표시됩니다.</p>;
+  const levels = [
+    ["매수가", plan.entry, "20일 이동평균선 재접근 시 검토"],
+    ["손절가", plan.stop, "매수가 − 14일 ATR × 1.5"],
+    ["매도가", plan.sell, "최근 20거래일 장중 최고가"],
+  ];
+  return <>
+    <small>{plan.date || stock.bars.at(-1).date} 종가 기준 · 다음 거래일 시나리오</small>
+    <h3>{plan.eligible ? "조건부 매수 검토" : "관망"}</h3>
+    <b>{plan.eligible ? "추천 이유" : "관망 이유"}</b>
+    <p>{plan.reason}</p>
+    {plan.entry != null && <>
+      <div className="tradeLevels">{levels.map(([label, value, basis]) =>
+        <div key={label}><small>{plan.eligible ? "추천" : "참고"} {label}</small>
+          <strong>{price(value, stock.currency)}</strong><small>{basis}</small></div>
+      )}</div>
+      <p>14일 ATR {price(plan.atr, stock.currency)} · 손익비 {fmt(plan.ratio)}배</p>
+      <ul>{plan.evidence.map(line => <li key={line}>{line}</li>)}</ul>
+      <p>{plan.eligible ? "매수가 부근에서 지지를 확인하는 조건입니다. 가격이 도달하지 않으면 진입을 보류합니다." : "위 가격은 관망 사유를 점검하기 위한 참고 시나리오입니다."} 시초가 갭과 거래 비용에 따라 실제 손익은 달라질 수 있습니다.</p>
+    </>}
+    {stock.reason && <p><b>선정 의견</b> {stock.reason}</p>}
+    {stock.risk && <p><b>위험 요인</b> {stock.risk}</p>}
+    {stock.sourceUrl && <a href={stock.sourceUrl} target="_blank" rel="noreferrer">네이버증권 기준 시세</a>}
+    {stock.news?.slice(0, 2).map(n => <p key={n.url}><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a></p>)}
+  </>;
+}
 function Detail({ s }) {
   const [count, setCount] = useState(20),
-    [tab, setTab] = useState(s.score == null ? "기술 지표" : "분석 리포트");
+    [tab, setTab] = useState("분석 리포트");
   const ind = s.indicators;
   return (
     <section className="detail panel" id="detail">
@@ -200,7 +228,7 @@ function Detail({ s }) {
           <Activity /> 종목 상세 분석 <span className="muted">{s.name}</span>
         </h2>
         <div className="segments">
-          {(s.score == null ? ["기술 지표"] : ["분석 리포트", "기술 지표"]).map((t) => (
+          {["분석 리포트", "기술 지표"].map((t) => (
             <button key={t} aria-pressed={t === tab} onClick={() => setTab(t)}>
               {t}
             </button>
@@ -247,27 +275,7 @@ function Detail({ s }) {
               ))}
             </div>
           ) : (
-            <>
-              <div className="guides">
-                <div>
-                  <small>목표가 가이드</small>
-                  <b className="up">{price(s.target, s.currency)}</b>
-                </div>
-                <div>
-                  <small>손절가 가이드</small>
-                  <b className="down">{price(s.stop, s.currency)}</b>
-                </div>
-              </div>
-              <p>{s.reason}</p>
-              <p className="risk">
-                <TriangleAlert size={15} /> {s.risk}
-              </p>
-              {s.news?.slice(0, 2).map((n) => (
-                <a key={n.url} href={n.url} target="_blank" rel="noreferrer">
-                  {n.title}
-                </a>
-              ))}
-            </>
+            <TradeReport stock={s} />
           )}
         </div>
       </div>

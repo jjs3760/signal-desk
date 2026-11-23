@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from pipeline import INDICES, STOCKS, indicators
+from trade_plan import trade_plan
 
 
 def sample(symbol, name, end_price, change, seed):
@@ -38,6 +39,8 @@ for i,(s,p,c,score,reason,risk) in enumerate([
         ("MSFT",428.56,.92,88,"안정적인 가격 추세와 MACD 개선이 중기 상승 흐름을 뒷받침합니다.","기술주 전반의 밸류에이션 조정이 하방 압력으로 작용할 수 있습니다.")]):
     stocks.append(dict(**sample(s,STOCKS[s],p,c,12+i),score=score,reason=reason,risk=risk,
                        target=round(p*1.08,2),stop=round(p*.95,2),news=[]))
+for stock in stocks:
+    stock["plan"] = trade_plan(stock)
 snapshot = dict(demo=True,asOf="2026-11-23T07:30:00+09:00",markets=markets,stocks=stocks,
                 sentiment=round(sum(m["indicators"]["rsi"] for m in markets)/4),
                 news=[dict(title=t,date="2026-11-23T06:30:00+09:00",url=None) for t in
