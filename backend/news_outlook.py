@@ -16,9 +16,11 @@ WINDOW = re.compile(
     r"|(?P<within>\d{1,2}|한|두)\s*(?P<wu>주|일)\s*(?:이내|안에|내)"
     r"|(?:within(?:\s+the\s+next)?|over\s+the\s+next|in\s+the\s+next|next)\s+"
     r"(?P<en>\d{1,2}|one|two|seven|ten|fourteen|a)\s+(?P<eu>days?|weeks?)\b)", re.I)
-UP = re.compile(r"(?:주가(?:가|는|의)?\s*)?(?:[\d.]+%\s*)?(?:상승|반등)(?:을|할|이|세가)?\s*(?:것으로\s*)?(?:전망|예상|기대)"
-                r"|(?:shares?|stock)\s+(?:(?:are|is)\s+)?(?:expected\s+to|forecast\s+to|will|could|likely\s+to|set\s+to|to)\s+(?:rise|rally|gain|rebound)\b", re.I)
-EXCLUDE = re.compile(r"아니|않|없[다을는어]|어렵|불투명|의문|불가능|철회|부인|하락|이었|했었|했지만|빗나|지난|"
+FORECAST = re.compile(r"(?:주가(?:가|는|의)?\s*)?(?:[\d.]+%\s*)?(?:상승|반등|(?P<down_ko>하락|급락|약세))"
+                      r"(?:을|할|일|이|가|세가)?\s*(?:것으로\s*)?(?:전망|예상|기대|우려)"
+                      r"|(?:shares?|stock)\s+(?:(?:are|is)\s+)?(?:expected\s+to|forecast\s+to|will|could|likely\s+to|set\s+to|to)\s+"
+                      r"(?:rise|rally|gain|rebound|(?P<down_en>fall|drop|decline|slide|slump))\b", re.I)
+EXCLUDE = re.compile(r"아니|않|없[다을는어]|어렵|불투명|의문|불가능|철회|부인|이었|했었|했지만|빗나|지난|"
                      r"\b(?:not|unlikely|denied|fell|previously|last|failed|withdrawn|if|unless)\b|[?？]", re.I)
 NUMBERS = {"한":1,"두":2,"one":1,"two":2,"seven":7,"ten":10,"fourteen":14,"a":1}
 
@@ -42,8 +44,14 @@ def news_outlook(stock, now):
                 if not horizon or EXCLUDE.search(clause):
                     continue
                 statement = clause[:horizon.start()] + " " + clause[horizon.end():]
-                name, direction = company.search(statement), UP.search(statement)
+                name, direction = company.search(statement), FORECAST.search(statement)
                 if not (name and direction):
+                    continue
+                bearish = bool(direction["down_ko"] or direction["down_en"])
+                if bearish and (stock.get("plan") or {}).get("eligible") is not False:
+                    continue
+                opposite = r"상승|반등|\b(?:rise|rally|rebound)\b" if bearish else r"하락|급락|약세|\b(?:fall|drop|decline)\b"
+                if re.search(opposite, statement, re.I):
                     continue
                 if horizon.start() > direction.end() and not re.fullmatch(
                     r"\s*(?:(?:by\s+)?\d+(?:\.\d+)?\s*%)?[\s,]*",
@@ -63,6 +71,7 @@ def news_outlook(stock, now):
                     days *= 7
                 expires = published + timedelta(days=days)
                 if 1 <= days <= 14 and now < expires:
-                    return dict(evidence=clause.strip(), source=article["source"], url=article["url"],
+                    return dict(direction="down" if bearish else "up",
+                                evidence=clause.strip(), source=article["source"], url=article["url"],
                                 publishedAt=article["date"], expiresAt=expires.isoformat(), days=days)
     return None

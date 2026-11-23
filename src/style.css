@@ -677,3 +677,5 @@ footer svg {
 .directory button[aria-pressed=true] { border-color:#9d83ca; background:#272336; }
 .outlookBadge { display:table; margin-bottom:.3rem; padding:.12rem .45rem; border-radius:.4rem; background:#40311b; color:#ffdc92; font-size:.85rem; font-weight:700; }
 .outlookEvidence { margin:1rem 0; padding:1rem; border-left:3px solid #e8af50; background:#25232a; }
+.outlookBadge[data-down=true] { background:#40252e; color:#ffb5c5; }
+.outlookEvidence[data-down=true] { border-left-color:#e68298; }

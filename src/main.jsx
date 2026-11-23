@@ -291,9 +291,13 @@ function NewsOutlook({stock, details = false}) {
     return () => clearTimeout(timer);
   }, [expiry]);
   if (!signal || !Number.isFinite(expiry) || Math.max(now, Date.now()) >= expiry) return null;
-  if (!details) return <span className="outlookBadge" title="뉴스에 명시된 2주 이내 주가 상승 전망">👍 강추</span>;
+  const bearish = signal.direction === "down";
+  if (bearish && stock.plan?.eligible !== false) return null;
+  const label = bearish ? "👎 비추" : "👍 강추";
+  const description = bearish ? "차트 관망 · 뉴스의 2주 이내 주가 하락 전망" : "뉴스의 2주 이내 주가 상승 전망";
+  if (!details) return <span className="outlookBadge" data-down={bearish} title={description}>{label}</span>;
   const date = value => new Date(value).toLocaleString("ko-KR", {timeZone:"Asia/Seoul"});
-  return <div className="outlookEvidence"><b>👍 강추 · 뉴스의 단기 상승 전망</b>
+  return <div className="outlookEvidence" data-down={bearish}><b>{label} · {description}</b>
     <p>{signal.evidence}</p><small>{date(signal.publishedAt)} 기사 · {date(expiry)} KST까지</small>
     <p><a href={signal.url} target="_blank" rel="noreferrer">{signal.source} 원문 보기</a></p></div>;
 }
