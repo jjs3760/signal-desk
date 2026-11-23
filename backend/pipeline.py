@@ -15,10 +15,12 @@ from zoneinfo import ZoneInfo
 try:
     from .market_news import collect_news, company_news, fetch
     from .universe import CATALOG, STOCKS
+    from .news_outlook import news_outlook
     from .trade_plan import trade_plan
 except ImportError:  # Direct script entry point.
     from market_news import collect_news, company_news, fetch
     from universe import CATALOG, STOCKS
+    from news_outlook import news_outlook
     from trade_plan import trade_plan
 import pandas as pd
 import requests
@@ -131,6 +133,7 @@ def collect(morning=False):
         except Exception:
             logging.exception("종목 뉴스 조회 실패 %s", symbol)
             stock.update(news=[], newsError=True)
+        stock["newsOutlook"] = news_outlook(stock, now)
         return stock
     with ThreadPoolExecutor(max_workers=4) as pool:
         universe = list(pool.map(collect_item, CATALOG.values()))

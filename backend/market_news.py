@@ -143,7 +143,7 @@ def company_news(item, now):
                 summary, language = translate_summary(summarize(body)) if body else ("", "en")
                 articles[entry.link] = dict(source=entry.get("source", {}).get("title") or "Yahoo Finance 종목 피드",
                     region="미국", title=entry.title, date=stamp.isoformat(), url=entry.link,
-                    summary=summary, language=language)
+                    summary=summary, originalSummary=summarize(body), language=language)
                 if sum(a["region"] == "미국" for a in articles.values()) >= 2:
                     break
         except requests.RequestException:

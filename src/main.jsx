@@ -224,7 +224,7 @@ function Detail({ s, id = "detail" }) {
     <section className="detail panel" id={id}>
       <div className="detailTop">
         <h2>
-          <Activity /> 종목 상세 분석 <span className="muted">{s.name}</span>
+          <Activity /> 종목 상세 분석 <span className="muted"><NewsOutlook stock={s}/>{s.name}</span>
         </h2>
         <div className="segments">
           {["분석 리포트", "기술 지표"].map((t) => (
@@ -281,9 +281,26 @@ function Detail({ s, id = "detail" }) {
     </section>
   );
 }
+function NewsOutlook({stock, details = false}) {
+  const signal = stock.newsOutlook;
+  const expiry = Date.parse(signal?.expiresAt);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!Number.isFinite(expiry)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, expiry - Date.now()) + 10);
+    return () => clearTimeout(timer);
+  }, [expiry]);
+  if (!signal || !Number.isFinite(expiry) || Math.max(now, Date.now()) >= expiry) return null;
+  if (!details) return <span className="outlookBadge" title="뉴스에 명시된 2주 이내 주가 상승 전망">👍 강추</span>;
+  const date = value => new Date(value).toLocaleString("ko-KR", {timeZone:"Asia/Seoul"});
+  return <div className="outlookEvidence"><b>👍 강추 · 뉴스의 단기 상승 전망</b>
+    <p>{signal.evidence}</p><small>{date(signal.publishedAt)} 기사 · {date(expiry)} KST까지</small>
+    <p><a href={signal.url} target="_blank" rel="noreferrer">{signal.source} 원문 보기</a></p></div>;
+}
 function CompanyNews({stock}) {
   return <section className="panel news"><h2><Newspaper/> {stock.name} 관련 뉴스</h2>
     <small>최근 7일 · 최대 3건</small>
+    <NewsOutlook stock={stock} details/>
     {stock.news?.length ? stock.news.map(n => <article key={n.url}>
       <small>{n.source} · {new Date(n.date).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST</small>
       <h3><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a></h3>
@@ -305,7 +322,7 @@ function SectorDirectory({universe}) {
       <button key={s.symbol} aria-pressed={symbol===s.symbol} onClick={() => {
         select(s.symbol); requestAnimationFrame(() => document.getElementById("sector-report")?.scrollIntoView({behavior:"smooth",block:"start"}));
       }}>
-        <span><b>{s.name}</b><small>{s.symbol} · {s.exchange} · {s.business}</small></span>
+        <span><NewsOutlook stock={s}/><b>{s.name}</b><small>{s.symbol} · {s.exchange} · {s.business}</small></span>
         <span>{s.price != null ? price(s.price,s.currency) : "시세 확인 보류"}<small>관련 뉴스 {s.news?.length || 0}건</small></span>
       </button>)}</div></>}
     {stock && <div id="sector-report">{stock.plan ? <Detail id="sector-chart" key={stock.symbol} s={stock}/> :
@@ -462,7 +479,7 @@ function Dashboard({ data }) {
                   <div className="stockName">
                     <Logo symbol={s.symbol} />
                     <div>
-                      <h3>{s.name}</h3>
+                      <NewsOutlook stock={s}/><h3>{s.name}</h3>
                       <small>
                         {s.symbol} · {s.exchange || (s.currency === "KRW" ? "KOSPI" : "NASDAQ")}
                       </small>
