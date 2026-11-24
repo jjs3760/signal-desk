@@ -679,3 +679,7 @@ footer svg {
 .outlookEvidence { margin:1rem 0; padding:1rem; border-left:3px solid #e8af50; background:#25232a; }
 .outlookBadge[data-down=true] { background:#40252e; color:#ffb5c5; }
 .outlookEvidence[data-down=true] { border-left-color:#e68298; }
+.dashboardHeading, .headlinePick { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; }
+.dashboardHeading { gap:.6rem 1rem; }
+.headlinePick { padding:.35rem .7rem; border:1px solid var(--border); border-radius:.5rem; background:var(--panel); }
+.headlinePick strong { color:var(--accent); }

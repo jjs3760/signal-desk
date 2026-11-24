@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { topPick } from "./top-pick.js";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -334,6 +335,9 @@ function SectorDirectory({universe}) {
   </section>;
 }
 function Dashboard({ data }) {
+  const pick = topPick(data);
+  const koreanDay = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Seoul"});
+  const pickLabel = data.demo ? "예시 추천주" : koreanDay.format(new Date(data.asOf)) === koreanDay.format(new Date()) ? "오늘의 추천주" : "최근 리포트 추천주";
   const ranked = data.ranked ?? true;
   const [selected, select] = useState(0),
     [page, setPage] = useState("desk");
@@ -382,7 +386,14 @@ function Dashboard({ data }) {
           <i /> MORNING BRIEFING
         </div>
         <div className="titleRow">
-          <h1>{page === "desk" ? "마켓 대시보드" : "시장 뉴스"}</h1>
+          <div className="dashboardHeading">
+            <h1>{page === "desk" ? "마켓 대시보드" : "시장 뉴스"}</h1>
+            {page === "desk" && <div className="headlinePick">
+              <small>{pickLabel}</small>
+              <strong>{pick?.stock.name ?? "없음"}</strong>
+              {pick && <small>{pick.basis}</small>}
+            </div>}
+          </div>
           <div className="date">
             <CalendarDays size={16} />
             {date}
