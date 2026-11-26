@@ -27,15 +27,20 @@ const fmt = (n, digits = 2) =>
   });
 const price = (n, currency) =>
   currency === "KRW" ? fmt(n, 0) + "원" : "$" + fmt(n);
+function directionClass(value) {
+  if (value > 0) return "up";
+  if (value < 0) return "down";
+  return "flat";
+}
 function Change({ value }) {
   return (
-    <span className={"change " + (value < 0 ? "down" : "up")}>
-      {value >= 0 ? "▴ +" : "▾ "}
+    <span className={"change " + directionClass(value)}>
+      {value > 0 ? "▴ +" : value < 0 ? "▾ " : ""}
       {fmt(value)}%
     </span>
   );
 }
-function Spark({ bars, negative, id }) {
+function Spark({ bars, change, id }) {
   const values = bars.slice(-32).map((b) => b.close),
     min = Math.min(...values),
     span = Math.max(...values) - min || 1;
@@ -48,10 +53,10 @@ function Spark({ bars, negative, id }) {
         (42 - (36 * (v - min)) / span),
     )
     .join(" ");
-  const color = negative ? "#f18b96" : "#42d6ae";
+  const color = "currentColor";
   return (
     <svg
-      className="spark"
+      className={"spark " + directionClass(change)}
       viewBox="0 0 200 50"
       preserveAspectRatio="none"
       aria-hidden="true"
@@ -165,10 +170,9 @@ function CandleChart({ bars, count }) {
         </g>
       ))}
       {rows.map((b, i) => {
-        const x = (i + 0.5) * step,
-          c = b.close >= b.open ? "#47d6ad" : "#f28a95";
+        const x = (i + 0.5) * step;
         return (
-          <g key={b.date} fill={c} stroke={c}>
+          <g key={b.date} className={directionClass(b.close - b.open)} fill="currentColor" stroke="currentColor">
             <title>
               {b.date} · O {b.open} H {b.high} L {b.low} C {b.close} V{" "}
               {b.volume}
@@ -456,7 +460,7 @@ function Dashboard({ data }) {
                   </div>
                   <strong>{fmt(m.price)}</strong>
                   <Change value={m.change} />
-                  <Spark bars={m.bars} negative={m.change < 0} id={"m" + i} />
+                  <Spark bars={m.bars} change={m.change} id={"m" + i} />
                   <small className="asof">{m.bars.at(-1).date}</small>
                 </article>
               ))}

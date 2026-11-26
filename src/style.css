@@ -251,10 +251,13 @@ small,
     sans-serif;
 }
 .up {
-  color: #54deba;
+  color: #ff7a85;
 }
 .down {
-  color: #f59aa4;
+  color: #70a8ff;
+}
+.flat {
+  color: var(--muted);
 }
 .spark {
   display: block;
