@@ -319,22 +319,32 @@ function CompanyNews({stock}) {
     </article>) : <p>{stock.newsError ? "뉴스를 불러오지 못했습니다." : "최근 7일 동안 수집된 관련 기사가 없습니다."}</p>}
   </section>;
 }
+function relativeVolume(stock) {
+  const bars = stock.bars?.slice(-21);
+  if (bars?.length !== 21 || !bars.every(b => Number.isFinite(b.volume) && b.volume >= 0)) return null;
+  const average = bars.slice(0, -1).reduce((sum, b) => sum + b.volume, 0) / 20;
+  return average > 0 ? bars[20].volume / average : null;
+}
 function SectorDirectory({universe}) {
   const sectors = [...new Set(universe.map(s => s.sector))];
   const [sector, setSector] = useState(null);
   const [symbol, select] = useState(null);
-  const rows = universe.filter(s => s.sector === sector);
-  const stock = rows.find(s => s.symbol === symbol);
+  const rows = universe.filter(s => s.sector === sector)
+    .map(stock => ({stock, ratio: relativeVolume(stock)}))
+    .sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1));
+  const stock = rows.find(row => row.stock.symbol === symbol)?.stock;
   return <section className="directory">
     <div className="sectionHead"><h2><LayoutDashboard/> 업종별 후보 종목</h2><small>총 {universe.length}개</small></div>
     <div className="sectorButtons">{sectors.map(name => <button key={name} aria-pressed={name===sector}
         onClick={() => {setSector(name); select(null);}}>{name} <small>{universe.filter(s=>s.sector===name).length}종목</small></button>)}</div>
-    {sector && <><h3>{sector} 후보 종목</h3><div className="sectorRows">{rows.map(s =>
+    {sector && <><h3>{sector} 후보 종목</h3>
+      <p className="muted">최근 마감 거래량이 직전 20거래일 평균의 몇 배인지 보여줍니다. 배수가 높은 순서입니다.</p>
+      <div className="sectorRows">{rows.map(({stock: s, ratio}) =>
       <button key={s.symbol} aria-pressed={symbol===s.symbol} onClick={() => {
         select(s.symbol); requestAnimationFrame(() => document.getElementById("sector-report")?.scrollIntoView({behavior:"smooth",block:"start"}));
       }}>
         <span><NewsOutlook stock={s}/><b>{s.name}</b><small>{s.symbol} · {s.exchange} · {s.business}</small></span>
-        <span>{s.price != null ? price(s.price,s.currency) : "시세 확인 보류"}<small>관련 뉴스 {s.news?.length || 0}건</small></span>
+        <span>{s.price != null ? price(s.price,s.currency) : "시세 확인 보류"}<small>{ratio != null ? `거래량 ${fmt(ratio)}배` : "거래량 비교 보류"}</small><small>관련 뉴스 {s.news?.length || 0}건</small></span>
       </button>)}</div></>}
     {stock && <div id="sector-report">{stock.plan ? <Detail id="sector-chart" key={stock.symbol} s={stock}/> :
       <p>{stock.name}의 마감 시세를 확인하지 못해 가격 분석을 보류했습니다.</p>}<CompanyNews stock={stock}/></div>}
