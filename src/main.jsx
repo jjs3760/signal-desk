@@ -12,6 +12,8 @@ import {
   Globe2,
   LayoutDashboard,
   Newspaper,
+  Sun,
+  Moon,
   PanelsTopLeft,
   ShieldCheck,
   Sparkles,
@@ -94,12 +96,12 @@ function Sentiment({ score }) {
         <path
           d="M17 72 A63 63 0 0 1 143 72"
           pathLength="100"
-          stroke="#353345"
+          stroke="var(--border)"
         />
         <path
           d="M17 72 A63 63 0 0 1 143 72"
           pathLength="100"
-          stroke="#aa8bff"
+          stroke="var(--accent)"
           strokeDasharray={score + " 100"}
         />
       </svg>
@@ -161,7 +163,7 @@ function CandleChart({ bars, count }) {
             x2="550"
             y1={8 + (i * 104) / 3}
             y2={8 + (i * 104) / 3}
-            stroke="#2a3140"
+            stroke="var(--border)"
             strokeDasharray="3 4"
           />
           <text x="557" y={12 + (i * 104) / 3}>
@@ -338,6 +340,22 @@ function SectorDirectory({universe}) {
       <p>{stock.name}의 마감 시세를 확인하지 못해 가격 분석을 보류했습니다.</p>}<CompanyNews stock={stock}/></div>}
   </section>;
 }
+function ThemePicker() {
+  const [theme, setTheme] = useState(document.documentElement.dataset.theme);
+  function choose(next) {
+    document.documentElement.dataset.theme = next;
+    setTheme(next);
+    try {
+      localStorage.setItem("signal-desk-theme", next);
+    } catch {}
+  }
+  return (
+    <div className="segments themePicker" role="group" aria-label="화면 테마">
+      <button aria-pressed={theme === "light"} onClick={() => choose("light")}><Sun size={16} />밝게</button>
+      <button aria-pressed={theme === "dark"} onClick={() => choose("dark")}><Moon size={16} />어둡게</button>
+    </div>
+  );
+}
 function Dashboard({ data }) {
   const pick = topPick(data);
   const koreanDay = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Seoul"});
@@ -383,9 +401,11 @@ function Dashboard({ data }) {
             <i />
             {data.demo ? "가상 시세 · 데모" : data.source + " · 일봉"}
           </span>
+          <ThemePicker />
         </div>
       </header>
       <main>
+        <section className="briefing">
         <div className="eyebrow">
           <i /> MORNING BRIEFING
         </div>
@@ -409,7 +429,8 @@ function Dashboard({ data }) {
             ? "글로벌 시장 흐름과 AI가 선별한 오늘의 투자 시그널"
             : "최근 24시간 동안 수집된 글로벌 증시 주요 헤드라인"}
         </p>
-        {data.publishedAt && <p className="subtitle">최근 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST · 매일 오전 7:30 게시 예정</p>}
+        {data.publishedAt && <p className="subtitle published">최근 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST · 매일 오전 7:30 게시 예정</p>}
+        </section>
         {page === "news" ? (
           <section className="panel news">
             <h2>
@@ -566,6 +587,7 @@ function App() {
     <Dashboard data={data} />
   ) : (
     <main>
+      <ThemePicker />
       {error
         ? <>{error} <a href="?demo=1">가상 데이터 데모 보기</a></>
         : "시장 데이터를 불러오는 중…"}
