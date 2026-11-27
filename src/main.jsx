@@ -439,7 +439,7 @@ function Dashboard({ data }) {
             ? "글로벌 시장 흐름과 AI가 선별한 오늘의 투자 시그널"
             : "최근 24시간 동안 수집된 글로벌 증시 주요 헤드라인"}
         </p>
-        {data.publishedAt && <p className="subtitle published">최근 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST · 매일 오전 7:30 게시 예정</p>}
+        {data.publishedAt && <p className="subtitle published">최근 갱신 {new Date(data.publishedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST · 매일 오전 8:00 수집 · 8:30 게시 예정</p>}
         </section>
         {page === "news" ? (
           <section className="panel news">

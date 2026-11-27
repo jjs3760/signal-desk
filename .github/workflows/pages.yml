@@ -3,8 +3,13 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      morning:
+        description: 'Run the daily 08:00 KST collection for the 08:30 release'
+        type: boolean
+        default: false
   schedule:
-    - cron: '25 22 * * *'
+    - cron: '0 23 * * *'
 
 permissions:
   contents: read
@@ -13,9 +18,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - id: check
+        env:
+          MORNING: ${{ github.event_name == 'schedule' || inputs.morning }}
+        run: |
+          publish=true
+          if [[ "$MORNING" == "true" ]]; then
+            day=$(TZ=Asia/Seoul date +%F)
+            url="https://jjs3760.github.io/signal-desk/latest.json?check=$GITHUB_RUN_ID"
+            if curl -fsS --max-time 20 "$url" | jq -e --arg day "$day" '
+              (.asOf >= ($day + "T08:00:00") and (.asOf | startswith($day)))
+              and (.publishedAt >= ($day + "T08:30:00"))' >/dev/null; then
+              publish=false
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+  build:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +57,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-        run: python backend/pipeline.py --morning
+        run: python backend/pipeline.py ${{ (github.event_name == 'schedule' || inputs.morning) && '--morning' || '' }}
       - run: npm run build -- --base=/signal-desk/
       - uses: actions/upload-pages-artifact@v4
         with:

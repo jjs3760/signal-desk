@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -160,8 +161,8 @@ def collect(morning=False):
                     universe=universe, ranked=bool(cards), excluded=excluded, news=news["market"],
                     sentiment=round(sum(m["indicators"]["rsi"] for m in markets) / len(markets)))
     if morning:
-        release = now.replace(hour=7, minute=30, second=0, microsecond=0)
-        if release-timedelta(minutes=5) <= now < release:
+        release = now.replace(hour=8, minute=30, second=0, microsecond=0)
+        if now < release:
             time.sleep(max(0, (release-datetime.now(KST)).total_seconds()))
     snapshot["publishedAt"] = datetime.now(KST).isoformat()
     payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
@@ -172,15 +173,28 @@ def collect(morning=False):
     logging.info("저장 완료 %s", OUTPUT)
 
 
+def request_morning_deployment():
+    """Back up the cloud timer when the scheduled Windows task can reach GitHub."""
+    try:
+        subprocess.run(["gh", "workflow", "run", "pages.yml", "--ref", "master", "-f", "morning=true"],
+                       cwd=Path(__file__).resolve().parents[1], check=True, timeout=20,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        logging.warning("GitHub 배포 요청 실패. 로컬 자료 수집을 계속합니다.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--request-deployment", action="store_true", help="PC에서 GitHub 아침 배포도 요청")
     parser.add_argument("--schedule", action="store_true")
-    parser.add_argument("--morning", action="store_true", help="07:25 수집 후 07:30 KST 게시")
+    parser.add_argument("--morning", action="store_true", help="08:00 수집 후 08:30 KST 게시")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     if args.schedule:
         scheduler = BlockingScheduler(timezone=KST)
-        scheduler.add_job(collect, "cron", hour=7, minute=25, kwargs={"morning":True}, misfire_grace_time=3600)
+        scheduler.add_job(collect, "cron", hour=8, minute=0, kwargs={"morning":True}, misfire_grace_time=3600)
         scheduler.start()
     else:
+        if args.morning and args.request_deployment:
+            request_morning_deployment()
         collect(morning=args.morning)
